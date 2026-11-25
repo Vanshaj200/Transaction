@@ -1,14 +1,14 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import any_user, writer
 from app.models import User
 from app.schemas.invoice import CancelRequest, InvoiceCreate, InvoiceOut, InvoiceSummary, InvoiceType
-from app.services import invoicing
+from app.services import invoicing, masters, pdf
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -48,3 +48,12 @@ def cancel_invoice(
 ):
     """Cancel = reverse, never delete: stock is restored and a mirror-image journal entry is posted."""
     return invoicing.to_out(db, invoicing.cancel_invoice(db, invoice_id, body.reason if body else None))
+
+
+@router.get("/{invoice_id}/pdf", dependencies=[Depends(any_user)], responses={200: {"content": {"application/pdf": {}}}})
+def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
+    """Download the invoice as a PDF."""
+    invoice = invoicing.get_invoice(db, invoice_id)
+    content = pdf.render_invoice_pdf(invoice, masters.get_party(db, invoice.party_id))
+    return Response(content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{invoice.invoice_no}.pdf"'})

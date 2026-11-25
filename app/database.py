@@ -22,7 +22,9 @@ def make_engine(url: str, **kwargs) -> Engine:
     return engine
 
 
-engine = make_engine(get_settings().database_url, pool_pre_ping=True)
+_s = get_settings()
+_pool = {} if _s.database_url.startswith("sqlite") else {"pool_size": _s.db_pool_size, "max_overflow": _s.db_max_overflow}
+engine = make_engine(_s.database_url, pool_pre_ping=True, **_pool)
 # expire_on_commit=False: objects stay readable after commit without an extra SELECT.
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
