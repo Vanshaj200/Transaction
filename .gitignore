@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+.locust/
+bench_out/
