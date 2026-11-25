@@ -50,7 +50,8 @@ In Swagger: call `/auth/login`, then press **Authorize** and enter the email and
 | `accountant` | viewer + create/update parties and items, create/cancel invoices, record payments |
 | `admin` | accountant + deactivate (soft-delete) parties/items + register users |
 
-Python 3.11 is the target (Dockerfile). It also runs on 3.13, which is what the tests were run with here.
+Python 3.11 is the target (Dockerfile). The full suite (114 tests, PostgreSQL) was run in a fresh 3.11 virtualenv
+with the pinned `requirements-dev.txt`, and also on 3.13.
 
 ## ER diagram
 ```mermaid
