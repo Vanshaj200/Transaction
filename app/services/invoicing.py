@@ -101,7 +101,8 @@ def get_invoice(db: Session, invoice_id: int) -> Invoice:
 
 
 def amount_paid(db: Session, invoice_id: int) -> int:
-    return db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.invoice_id == invoice_id))
+    # PostgreSQL returns SUM(bigint) as NUMERIC (a Decimal), so convert to int explicitly.
+    return int(db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.invoice_id == invoice_id)))
 
 
 def to_out(db: Session, invoice: Invoice) -> InvoiceOut:
@@ -129,7 +130,8 @@ def list_invoices(db: Session, *, invoice_type=None, party_id=None, status=None,
         stmt = stmt.where(Invoice.invoice_date <= date_to)
     stmt = stmt.order_by(Invoice.invoice_date.desc(), Invoice.id.desc()).limit(limit).offset(offset)
     result = []
-    for inv, party_name, paid_amt in db.execute(stmt):
+    for inv, party_name, paid_raw in db.execute(stmt):
+        paid_amt = int(paid_raw)  # NUMERIC -> int on PostgreSQL
         summary = InvoiceSummary.model_validate(inv, from_attributes=True)
         due = 0 if inv.status == "cancelled" else inv.grand_total - paid_amt
         result.append(summary.model_copy(update={"party_name": party_name, "amount_paid": paid_amt, "balance_due": due}))
