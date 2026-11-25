@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.errors import DomainError
-from app.routers import auth, items, parties
+from app.routers import auth, invoices, items, parties
 
 app = FastAPI(
     title="BillBook",
@@ -14,6 +14,7 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(parties.router)
 app.include_router(items.router)
+app.include_router(invoices.router)
 
 
 @app.exception_handler(DomainError)
