@@ -30,6 +30,12 @@ class InsufficientStock(Conflict):
         self.item_id, self.available, self.requested = item_id, available, requested
 
 
-class UnbalancedEntry(DomainError):
-    """A journal entry whose debits != credits. This is a programming error, so it is a 500."""
+
+
+class LedgerError(DomainError):
+    """Accounting integrity problem (missing account, bad posting). Never the client's fault."""
     status_code = 500
+
+
+class UnbalancedEntry(LedgerError):
+    """A journal entry whose debits != credits. This is a programming error, so it is a 500."""

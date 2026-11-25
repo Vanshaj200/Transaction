@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import any_user, writer
 from app.models import User
-from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceSummary, InvoiceType
+from app.schemas.invoice import CancelRequest, InvoiceCreate, InvoiceOut, InvoiceSummary, InvoiceType
 from app.services import invoicing
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -39,3 +39,12 @@ def list_invoices(
 @router.get("/{invoice_id}", response_model=InvoiceOut, dependencies=[Depends(any_user)])
 def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     return invoicing.to_out(db, invoicing.get_invoice(db, invoice_id))
+
+
+@router.post("/{invoice_id}/cancel", response_model=InvoiceOut)
+def cancel_invoice(
+    invoice_id: int, body: CancelRequest | None = None,
+    db: Session = Depends(get_db), user: User = Depends(writer),
+):
+    """Cancel = reverse, never delete: stock is restored and a mirror-image journal entry is posted."""
+    return invoicing.to_out(db, invoicing.cancel_invoice(db, invoice_id, body.reason if body else None))

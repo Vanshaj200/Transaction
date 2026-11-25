@@ -1,19 +1,20 @@
 """Invoice creation and queries.
 
 create_invoice() is the heart of the system. It runs as ONE database transaction:
-    lock items -> compute GST -> save invoice -> move stock -> (post journal) -> COMMIT
+    lock items -> compute GST -> save invoice -> move stock -> post journal -> COMMIT
 and any exception rolls the whole thing back.
 """
 import uuid
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.errors import Conflict, InvalidInput, NotFound
+from app.errors import Conflict, InsufficientStock, InvalidInput, NotFound
 from app.models import Invoice, InvoiceLine, Party, Payment
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceSummary
-from app.services import gst, inventory, masters
+from app.services import gst, inventory, ledger, masters
 
 INVOICE_PREFIX = {"sale": "INV", "purchase": "PUR"}
 # party type that each invoice type may be raised against
@@ -47,6 +48,9 @@ def _create_invoice(db: Session, data: InvoiceCreate, user_id: int | None) -> In
     lines = [_build_line(pos, line_in, items[line_in.item_id], data.invoice_type, supply)
              for pos, line_in in enumerate(data.lines, start=1)]
 
+    if sum(ln.line_total for ln in lines) <= 0:
+        raise InvalidInput("Invoice total must be greater than zero")
+
     # 3. Save the invoice. The invoice number is derived from the generated id (see README).
     invoice = Invoice(
         invoice_no=f"TMP-{uuid.uuid4().hex[:24]}",  # unique placeholder, replaced right after flush
@@ -68,12 +72,9 @@ def _create_invoice(db: Session, data: InvoiceCreate, user_id: int | None) -> In
     for line in lines:
         inventory.change_stock(db, items[line.item_id], sign * line.quantity, STOCK_REASON[data.invoice_type], invoice.id)
 
-    _post_to_ledger(db, invoice)
+    # 5. Post the double-entry journal (same transaction: if this raises, steps 1-4 roll back too).
+    ledger.post_invoice(db, invoice)
     return invoice
-
-
-def _post_to_ledger(db: Session, invoice: Invoice) -> None:
-    """Step 5 of the transaction: journal entry. Wired up in the ledger stage."""
 
 
 def _build_line(position: int, line_in, item, invoice_type: str, supply: str) -> InvoiceLine:
@@ -136,3 +137,46 @@ def list_invoices(db: Session, *, invoice_type=None, party_id=None, status=None,
         due = 0 if inv.status == "cancelled" else inv.grand_total - paid_amt
         result.append(summary.model_copy(update={"party_name": party_name, "amount_paid": paid_amt, "balance_due": due}))
     return result
+
+
+# ------------------------------------------------------------------ cancellation
+def cancel_invoice(db: Session, invoice_id: int, reason: str | None = None) -> Invoice:
+    """Invoices are never deleted. Cancelling = status flip + stock put back + a REVERSING journal entry."""
+    try:
+        invoice = _cancel_invoice(db, invoice_id, reason)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return invoice
+
+
+def _cancel_invoice(db: Session, invoice_id: int, reason: str | None) -> Invoice:
+    # Lock the invoice row: two simultaneous cancels (or a payment racing a cancel) queue up here,
+    # and the loser then sees the new status instead of acting on stale data.
+    invoice = db.scalar(
+        select(Invoice).where(Invoice.id == invoice_id).with_for_update()
+        .execution_options(populate_existing=True).options(selectinload(Invoice.lines))
+    )
+    if invoice is None:
+        raise NotFound(f"Invoice {invoice_id} not found")
+    if invoice.status == "cancelled":
+        raise Conflict(f"Invoice {invoice.invoice_no} is already cancelled")
+    if amount_paid(db, invoice.id) > 0:
+        raise Conflict(f"Invoice {invoice.invoice_no} has payments recorded and cannot be cancelled")
+
+    items = inventory.lock_items(db, (line.item_id for line in invoice.lines))
+    # Undo the stock effect. A sale gives stock back; cancelling a purchase takes it out again,
+    # which is refused if that stock has already been sold.
+    sign, stock_reason = (1, "sale_cancel") if invoice.invoice_type == "sale" else (-1, "purchase_cancel")
+    for line in invoice.lines:
+        try:
+            inventory.change_stock(db, items[line.item_id], sign * line.quantity, stock_reason, invoice.id)
+        except InsufficientStock as exc:
+            raise Conflict(f"Cannot cancel purchase {invoice.invoice_no}: {exc.message}") from exc
+
+    ledger.reverse_invoice_entry(db, invoice, entry_date=date.today())
+    invoice.status = "cancelled"
+    invoice.cancelled_at = datetime.now(timezone.utc)
+    invoice.cancel_reason = reason
+    return invoice

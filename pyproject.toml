@@ -2,6 +2,7 @@
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["postgres: needs a real PostgreSQL (set TEST_DATABASE_URL); skipped on SQLite"]
 
 [tool.coverage.run]
 source = ["app"]
