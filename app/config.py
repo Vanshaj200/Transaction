@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://billbook:billbook@localhost:5432/billbook"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = "dev-only-secret-change-me-in-production-0123456789"
     access_token_expire_minutes: int = 60
 
     # Our own company. company_state_code is what GST place-of-supply logic compares against.

@@ -88,3 +88,36 @@ def _clean_db(engine):
 def db(session_factory):
     with session_factory() as session:
         yield session
+
+
+# ---------------------------------------------------------------- API client + auth helpers
+@pytest.fixture
+def client(session_factory):
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+
+    from app.database import get_db  # noqa: PLC0415
+    from app.main import app  # noqa: PLC0415
+
+    def override():
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def headers(db):
+    """headers("admin") -> {"Authorization": "Bearer ..."} for a freshly created user of that role."""
+    from app.models import User  # noqa: PLC0415
+    from app.security import create_access_token, hash_password  # noqa: PLC0415
+
+    def make(role: str = "admin") -> dict:
+        user = User(email=f"{role}-{os.urandom(3).hex()}@example.com", hashed_password=hash_password("password123"), role=role)
+        db.add(user)
+        db.commit()
+        return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+    return make
