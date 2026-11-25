@@ -27,8 +27,6 @@ class JournalEntry(Base):
         ),
         # Find the entries (original + reversal) of an invoice, e.g. when cancelling.
         Index("ix_journal_entries_invoice", "invoice_id"),
-        # Trial balance "as of date" filters on entry_date.
-        Index("ix_journal_entries_date", "entry_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -48,11 +46,10 @@ class JournalLine(Base):
         CheckConstraint("debit >= 0 AND credit >= 0", name="nonneg"),
         # A line is either a debit or a credit, never both and never empty.
         CheckConstraint("(debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)", name="one_side"),
-        # Fetch / sum the lines of one entry (balance check, reversal).
+        # Lines of one entry: the deferred balance trigger and the reversal both read them by entry_id,
+        # and it is the FK to journal_entries. (An index on account_id was tried for the trial balance and
+        # removed: that report must read every line anyway, the planner ignored it and it was not faster.)
         Index("ix_journal_lines_entry", "entry_id"),
-        # Trial balance: GROUP BY account summing debit & credit; including both amounts makes it
-        # an index-only scan instead of reading every heap row.
-        Index("ix_journal_lines_account_amounts", "account_id", "debit", "credit"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
